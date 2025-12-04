@@ -273,7 +273,7 @@ class _MainShellState extends State<MainShell> {
         // Treat as vertical (portrait) by default; adapt when window is wider than tall
         final bool isPortrait = constraints.maxHeight >= constraints.maxWidth;
         final double thumbSize = isPortrait ? 110.0 : 140.0;
-        final double cardHeight = isPortrait ? 120.0 : 140.0;
+        final double cardHeight = isPortrait ? 140.0 : 160.0;
         final double topSpacing = isPortrait
             ? constraints.maxHeight * 0.06
             : constraints.maxHeight * 0.04;
@@ -801,9 +801,10 @@ class ResultCard extends StatelessWidget {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.all(12.0),
+                  padding: const EdgeInsets.all(10.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         recipe['name'] ?? '',
@@ -811,8 +812,10 @@ class ResultCard extends StatelessWidget {
                           fontSize: isPortrait ? 16 : 18,
                           fontWeight: FontWeight.w800,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
                         'Match: ${((recipe['score'] ?? 0.0) * 100).round()}%',
                         style: const TextStyle(
@@ -821,13 +824,15 @@ class ResultCard extends StatelessWidget {
                         ),
                       ),
                       if (missing.isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         Text(
                           'Needed: ${missing.take(3).join(", ")}${missing.length > 3 ? ', ...' : ''}',
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 12,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                       const Spacer(),
@@ -837,8 +842,13 @@ class ResultCard extends StatelessWidget {
                           onPressed: onCook,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            minimumSize: const Size(60, 32),
                           ),
-                          child: const Text('Cook'),
+                          child: const Text('Cook', style: TextStyle(fontSize: 14)),
                         ),
                       ),
                     ],
