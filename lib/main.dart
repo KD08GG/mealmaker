@@ -118,34 +118,36 @@ class _MainShellState extends State<MainShell> {
 
     await Future.delayed(const Duration(milliseconds: 250));
 
-    // Fetch candidate recipes from remote API (TheMealDB) and compute scores
+    // Fetch candidate recipes from BOTH local and API
     try {
-      // ensure API availability before attempting remote fetch
+      // Always get local recipes first
+      final localRecipes = recipes
+          .map(
+            (r) => {
+              'id': r['name'],
+              'name': r['name'],
+              'instructions': r['instructions'],
+              'ingredients': (r['ingredients'] as List)
+                  .map((e) => e.toString().toLowerCase().trim())
+                  .toList(),
+            },
+          )
+          .toList();
+
+      // Try to get API recipes
+      List<Map<String, dynamic>> apiRecipes = [];
       if (!apiAvailable) await _checkApiAvailable();
-      List<Map<String, dynamic>> remote = [];
       if (apiAvailable) {
-        remote = await fetchRecipesFromApi(tokens);
+        apiRecipes = await fetchRecipesFromApi(tokens);
       }
-      // if API returned nothing, fall back to local dataset
-      if (remote.isEmpty) {
-        remote = recipes
-            .map(
-              (r) => {
-                'id': r['name'],
-                'name': r['name'],
-                'instructions': r['instructions'],
-                'ingredients': (r['ingredients'] as List)
-                    .map((e) => e.toString().toLowerCase().trim())
-                    .toList(),
-              },
-            )
-            .toList();
-      }
+
+      // Combine both sources
+      final allRecipes = [...localRecipes, ...apiRecipes];
 
       // compute scores and missing ingredients
       final userSet = tokens.toSet();
       final List<Map<String, dynamic>> scored = [];
-      for (final rcp in remote) {
+      for (final rcp in allRecipes) {
         final rIngredients = (rcp['ingredients'] as List)
             .map((e) => normalizeIngredient(e.toString()))
             .where((s) => s.isNotEmpty)
@@ -161,7 +163,7 @@ class _MainShellState extends State<MainShell> {
           "thumbnail": rcp['thumbnail'] ?? '',
           "tags": rcp['tags'] ?? [],
           "missing": missing,
-          "sourceId": rcp['id'], // Add sourceId to distinguish local vs API
+          "sourceId": rcp['id'], // Distinguish local vs API
         });
       }
       scored.sort(
@@ -791,12 +793,10 @@ class ResultCard extends StatelessWidget {
                     bottomLeft: Radius.circular(12),
                   ),
                 ),
-                child: Center(
-                  child: Icon(
-                    isFromApi ? Icons.cloud : Icons.storage,
-                    size: 40,
-                    color: isFromApi ? Colors.blue.shade700 : Colors.green.shade700,
-                  ),
+                child: const Icon(
+                  Icons.restaurant,
+                  size: 40,
+                  color: Colors.black54,
                 ),
               ),
               Expanded(
@@ -805,40 +805,12 @@ class ResultCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              recipe['name'] ?? '',
-                              style: TextStyle(
-                                fontSize: isPortrait ? 16 : 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isFromApi
-                                  ? Colors.blue.shade100
-                                  : Colors.green.shade100,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              isFromApi ? 'API' : 'Local',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: isFromApi
-                                    ? Colors.blue.shade900
-                                    : Colors.green.shade900,
-                              ),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        recipe['name'] ?? '',
+                        style: TextStyle(
+                          fontSize: isPortrait ? 16 : 18,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
