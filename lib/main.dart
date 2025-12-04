@@ -539,7 +539,7 @@ class SeeAllPage extends StatelessWidget {
             crossAxisCount: 2,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
-            childAspectRatio: 0.8,
+            childAspectRatio: 1.1,
           ),
           itemCount: recipes.length,
           itemBuilder: (context, index) {
@@ -593,7 +593,7 @@ class SavedPage extends StatelessWidget {
                   crossAxisCount: 2,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
-                  childAspectRatio: 0.8,
+                  childAspectRatio: 1.1,
                 ),
                 itemCount: favRecipes.length,
                 itemBuilder: (context, index) {
@@ -938,7 +938,7 @@ class GridRecipeCard extends StatelessWidget {
         children: [
           // Image/Gradient thumbnail
           Expanded(
-            flex: 3,
+            flex: 5,
             child: ClipRRect(
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
@@ -949,33 +949,38 @@ class GridRecipeCard extends StatelessWidget {
           ),
           // Recipe info
           Expanded(
-            flex: 2,
+            flex: 3,
             child: Padding(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    recipe['name'] ?? '',
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        recipe['name'] ?? '',
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: Colors.black87,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   ElevatedButton(
                     onPressed: () => onCook(recipe),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
-                        vertical: 6,
+                        vertical: 4,
                       ),
-                      minimumSize: const Size(60, 28),
+                      minimumSize: const Size(60, 26),
                     ),
-                    child: const Text('Cook', style: TextStyle(fontSize: 12)),
+                    child: const Text('Cook', style: TextStyle(fontSize: 11)),
                   ),
                 ],
               ),
@@ -1027,7 +1032,7 @@ class GridRecipeCard extends StatelessWidget {
       child: Center(
         child: Icon(
           Icons.restaurant,
-          size: 50,
+          size: 35,
           color: Colors.white.withOpacity(0.8),
         ),
       ),
