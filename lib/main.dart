@@ -783,20 +783,22 @@ class ResultCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           child: Row(
             children: [
+              // Thumbnail: Image from API or Gradient for local
               Container(
                 width: thumbSize,
                 height: thumbSize,
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(12),
                     bottomLeft: Radius.circular(12),
                   ),
                 ),
-                child: const Icon(
-                  Icons.restaurant,
-                  size: 40,
-                  color: Colors.black54,
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    bottomLeft: Radius.circular(12),
+                  ),
+                  child: _buildThumbnail(recipe, thumbSize),
                 ),
               ),
               Expanded(
@@ -861,6 +863,61 @@ class ResultCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildThumbnail(Map<String, dynamic> recipe, double size) {
+    final thumbnail = recipe['thumbnail']?.toString() ?? '';
+    final hasImage = thumbnail.isNotEmpty && thumbnail.startsWith('http');
+
+    if (hasImage) {
+      // Show API image
+      return Image.network(
+        thumbnail,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Center(
+            child: CircularProgressIndicator(
+              value: loadingProgress.expectedTotalBytes != null
+                  ? loadingProgress.cumulativeBytesLoaded /
+                      loadingProgress.expectedTotalBytes!
+                  : null,
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          // If image fails to load, show gradient
+          return _buildGradientThumbnail(recipe, size);
+        },
+      );
+    } else {
+      // Show gradient for local recipes
+      return _buildGradientThumbnail(recipe, size);
+    }
+  }
+
+  Widget _buildGradientThumbnail(Map<String, dynamic> recipe, double size) {
+    final gradientColors = getGradientForRecipe(recipe['tags']);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradientColors,
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.restaurant,
+          size: 40,
+          color: Colors.white.withOpacity(0.8),
+        ),
+      ),
+    );
+  }
 }
 
 /// Grid card used in See All / Saved pages
@@ -876,25 +933,103 @@ class GridRecipeCard extends StatelessWidget {
         color: Colors.grey.shade200,
         borderRadius: BorderRadius.circular(12),
       ),
-      padding: const EdgeInsets.all(8),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.fastfood, size: 48, color: Colors.black38),
-          const SizedBox(height: 8),
-          Text(
-            recipe['name'] ?? '',
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800),
+          // Image/Gradient thumbnail
+          Expanded(
+            flex: 3,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+              child: _buildThumbnail(),
+            ),
           ),
-          const Spacer(),
-          ElevatedButton(
-            onPressed: () => onCook(recipe),
-            child: const Text('Cook'),
+          // Recipe info
+          Expanded(
+            flex: 2,
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    recipe['name'] ?? '',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () => onCook(recipe),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      minimumSize: const Size(60, 28),
+                    ),
+                    child: const Text('Cook', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildThumbnail() {
+    final thumbnail = recipe['thumbnail']?.toString() ?? '';
+    final hasImage = thumbnail.isNotEmpty && thumbnail.startsWith('http');
+
+    if (hasImage) {
+      return Image.network(
+        thumbnail,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Center(
+            child: CircularProgressIndicator(
+              value: loadingProgress.expectedTotalBytes != null
+                  ? loadingProgress.cumulativeBytesLoaded /
+                      loadingProgress.expectedTotalBytes!
+                  : null,
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return _buildGradientThumbnail();
+        },
+      );
+    } else {
+      return _buildGradientThumbnail();
+    }
+  }
+
+  Widget _buildGradientThumbnail() {
+    final gradientColors = getGradientForRecipe(recipe['tags']);
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradientColors,
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.restaurant,
+          size: 50,
+          color: Colors.white.withOpacity(0.8),
+        ),
       ),
     );
   }
@@ -1384,3 +1519,33 @@ Future<List<Map<String, dynamic>>> fetchRecipesFromApi(
 
   return out;
 }
+
+/// Helper function to get gradient colors based on recipe tags
+List<Color> getGradientForRecipe(dynamic tags) {
+  // Handle both List and String tags
+  String tagString = '';
+  if (tags is List && tags.isNotEmpty) {
+    tagString = tags.first.toString().toLowerCase();
+  } else if (tags is String) {
+    tagString = tags.toLowerCase();
+  }
+
+  // Return gradient colors based on tag
+  if (tagString.contains('breakfast')) {
+    return [Colors.orange.shade400, Colors.orange.shade600];
+  } else if (tagString.contains('lunch') || tagString.contains('salad')) {
+    return [Colors.green.shade400, Colors.green.shade600];
+  } else if (tagString.contains('dinner') || tagString.contains('main')) {
+    return [Colors.blue.shade400, Colors.blue.shade600];
+  } else if (tagString.contains('snack') || tagString.contains('dip')) {
+    return [Colors.purple.shade400, Colors.purple.shade600];
+  } else if (tagString.contains('dessert') || tagString.contains('sweet')) {
+    return [Colors.pink.shade400, Colors.pink.shade600];
+  } else if (tagString.contains('soup')) {
+    return [Colors.red.shade400, Colors.red.shade600];
+  } else {
+    // Default gradient for unknown tags
+    return [Colors.teal.shade400, Colors.teal.shade600];
+  }
+}
+
