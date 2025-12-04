@@ -41,6 +41,8 @@ dependencies:
   speech_to_text: ^7.3.0  # optional - fallback to system STT
   http: ^1.6.0
   sqflite: ^2.3.3+1
+  sqflite_common_ffi: ^2.3.0   # <-- MOVIDO AQUÍ
+
   path: ^1.9.0
 
 dev_dependencies:
@@ -95,3 +97,4 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+  

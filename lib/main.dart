@@ -13,7 +13,16 @@ import 'data/repositories/recipe_repository.dart';
 import 'data/repositories/initial_recipes.dart';
 import 'data/services/search_service.dart';
 
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Necesario para Windows / Linux / Desktop
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+
   runApp(const MealMakerApp());
 }
 
