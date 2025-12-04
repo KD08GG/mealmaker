@@ -6,7 +6,23 @@ import 'dart:math';
 import 'package:flutter/services.dart'; // for optional platform channels (vosk)
 import 'package:http/http.dart' as http;
 
+// Import new data layer
+import 'data/models/recipe.dart';
+import 'data/database/recipe_dao.dart';
+import 'data/repositories/recipe_repository.dart';
+import 'data/repositories/initial_recipes.dart';
+import 'data/services/search_service.dart';
+
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Necesario para Windows / Linux / Desktop
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+
   runApp(const MealMakerApp());
 }
 
@@ -70,6 +86,31 @@ class _MainShellState extends State<MainShell> {
   final Set<String> favorites = {}; // recipe names
   static const platform = MethodChannel('com.example.mealmaker/vosk');
 
+  // New data layer instances
+  late RecipeRepository repository;
+  late SearchService searchService;
+  bool isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeDatabase();
+  }
+
+  Future<void> _initializeDatabase() async {
+    final dao = RecipeDao();
+
+    // Insert initial 50 recipes if database is empty
+    await dao.insertInitialRecipes(initialRecipes);
+
+    repository = RecipeRepository(dao);
+    searchService = SearchService(repository);
+
+    setState(() {
+      isInitialized = true;
+    });
+  }
+
   @override
   void dispose() {
     inputController.dispose();
@@ -81,60 +122,36 @@ class _MainShellState extends State<MainShell> {
       _showWarning("Please type some ingredients or use the mic.");
       return;
     }
+
+    if (!isInitialized) {
+      _showWarning("Database is initializing, please wait...");
+      return;
+    }
+
     setState(() {
       isLoading = true;
       loadingLabel = "Looking for best recipes…";
     });
 
-    final tokens = rawIngredients
-        .toLowerCase()
-        .replaceAll(',', ' ')
-        .split(RegExp(r'\s+'))
-        .where((s) => s.trim().isNotEmpty)
-        .toList();
-
     await Future.delayed(const Duration(milliseconds: 250));
 
-    // Fetch candidate recipes from remote API (TheMealDB) and compute scores
     try {
-      final remote = await fetchRecipesFromApi(tokens);
-      // compute scores and missing ingredients
-      final userSet = tokens.toSet();
-      final List<Map<String, dynamic>> scored = [];
-      for (final rcp in remote) {
-        final rIngredients = (rcp['ingredients'] as List)
-            .map((e) => e.toString().toLowerCase().trim())
-            .toSet();
-        final overlap = userSet.intersection(rIngredients).length;
-        final score = overlap / max(1, rIngredients.length);
-        final missing = rIngredients.difference(userSet).toList();
-        scored.add({
-          'name': rcp['name'],
-          'score': score,
-          'ingredients': rcp['ingredients'],
-          'instructions': rcp['instructions'] ?? '',
-          'missing': missing,
-          'sourceId': rcp['id'] ?? '',
-        });
-      }
-      scored.sort(
-        (a, b) => (b['score'] as double).compareTo(a['score'] as double),
-      );
+      // Use new search service (SQLite + API + natural language)
+      final results = await searchService.search(rawIngredients);
+
       setState(() {
-        allMatches = scored.where((m) => (m['score'] as double) > 0).toList();
+        allMatches = results.where((m) => (m['score'] as double) > 0).toList();
         displayCount = min(3, allMatches.length);
         searchActive = true;
         isLoading = false;
       });
     } catch (e) {
-      // fallback to local recipes if API fails
-      final r = suggestRecipes(tokens, topK: recipes.length);
       setState(() {
-        allMatches = r.where((m) => (m['score'] as double) > 0).toList();
-        displayCount = min(3, allMatches.length);
+        allMatches = [];
         searchActive = true;
         isLoading = false;
       });
+      _showWarning("Search failed: ${e.toString()}");
     }
   }
 
@@ -490,14 +507,19 @@ class _MainShellState extends State<MainShell> {
                           children: [
                             TextButton.icon(
                               onPressed: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => SeeAllPage(
-                                      recipes: recipes,
-                                      onCook: openDetails,
+                                if (isInitialized) {
+                                  final allRecipes = await repository.getAllLocalRecipes();
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => SeeAllPage(
+                                        recipes: allRecipes,
+                                        onCook: openDetails,
+                                      ),
                                     ),
-                                  ),
-                                );
+                                  );
+                                } else {
+                                  _showWarning("Database is initializing...");
+                                }
                               },
                               icon: const Icon(
                                 Icons.grid_view,
@@ -516,15 +538,20 @@ class _MainShellState extends State<MainShell> {
                             ),
                             TextButton.icon(
                               onPressed: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => SavedPage(
-                                      recipes: recipes,
-                                      favorites: favorites,
-                                      onCook: openDetails,
+                                if (isInitialized) {
+                                  final allRecipes = await repository.getAllLocalRecipes();
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => SavedPage(
+                                        recipes: allRecipes,
+                                        favorites: favorites,
+                                        onCook: openDetails,
+                                      ),
                                     ),
-                                  ),
-                                );
+                                  );
+                                } else {
+                                  _showWarning("Database is initializing...");
+                                }
                               },
                               icon: const Icon(
                                 Icons.bookmark,
@@ -580,7 +607,7 @@ class _MainShellState extends State<MainShell> {
 /// See All Page: grid of flip cards
 /// -----------------------------
 class SeeAllPage extends StatelessWidget {
-  final List<Map<String, dynamic>> recipes;
+  final List<Recipe> recipes;
   final Future<void> Function(Map<String, dynamic>) onCook;
   const SeeAllPage({super.key, required this.recipes, required this.onCook});
 
@@ -616,7 +643,7 @@ class SeeAllPage extends StatelessWidget {
     );
   }
 
-  Widget _buildFront(Map<String, dynamic> r) {
+  Widget _buildFront(Recipe r) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.grey.shade200,
@@ -628,7 +655,7 @@ class SeeAllPage extends StatelessWidget {
           const Icon(Icons.fastfood, size: 48, color: Colors.black38),
           const SizedBox(height: 8),
           Text(
-            r['name'] ?? '',
+            r.name,
             textAlign: TextAlign.center,
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
@@ -637,7 +664,7 @@ class SeeAllPage extends StatelessWidget {
     );
   }
 
-  Widget _buildBack(Map<String, dynamic> r, BuildContext context) {
+  Widget _buildBack(Recipe r, BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white12,
@@ -648,7 +675,7 @@ class SeeAllPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            r['name'] ?? '',
+            r.name,
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w800,
@@ -656,13 +683,19 @@ class SeeAllPage extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Ingredients: ${(r['ingredients'] as List).take(4).join(", ")}',
+            'Ingredients: ${r.ingredients.take(4).join(", ")}',
             style: const TextStyle(color: Colors.white70),
           ),
           const Spacer(),
           Center(
             child: ElevatedButton(
-              onPressed: () => onCook(r),
+              onPressed: () => onCook({
+                'name': r.name,
+                'ingredients': r.ingredients,
+                'instructions': r.instructions,
+                'score': 1.0,
+                'missing': [],
+              }),
               child: const Text('Cook'),
             ),
           ),
@@ -676,7 +709,7 @@ class SeeAllPage extends StatelessWidget {
 /// Saved Page: grid of favorites only
 /// -----------------------------
 class SavedPage extends StatelessWidget {
-  final List<Map<String, dynamic>> recipes;
+  final List<Recipe> recipes;
   final Set<String> favorites;
   final Future<void> Function(Map<String, dynamic>) onCook;
   const SavedPage({
@@ -689,7 +722,7 @@ class SavedPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final favRecipes = recipes
-        .where((r) => favorites.contains(r['name']))
+        .where((r) => favorites.contains(r.name))
         .toList();
     return Scaffold(
       backgroundColor: Colors.black,
@@ -726,7 +759,7 @@ class SavedPage extends StatelessWidget {
                       ),
                       child: Center(
                         child: Text(
-                          r['name'] ?? '',
+                          r.name,
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -741,7 +774,7 @@ class SavedPage extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            r['name'] ?? '',
+                            r.name,
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
@@ -750,7 +783,13 @@ class SavedPage extends StatelessWidget {
                           const Spacer(),
                           Center(
                             child: ElevatedButton(
-                              onPressed: () => onCook(r),
+                              onPressed: () => onCook({
+                                'name': r.name,
+                                'ingredients': r.ingredients,
+                                'instructions': r.instructions,
+                                'score': 1.0,
+                                'missing': [],
+                              }),
                               child: const Text('Cook'),
                             ),
                           ),
@@ -1037,168 +1076,3 @@ class _SpinnerPainter extends CustomPainter {
       oldDelegate.rotation != rotation;
 }
 
-/// -----------------------------
-/// Local recipe DB and suggestRecipes
-/// -----------------------------
-final List<Map<String, dynamic>> recipes = [
-  {
-    "name": "Vegetable Omelette",
-    "ingredients": ["eggs", "onion", "tomato", "spinach", "salt", "pepper"],
-    "instructions":
-        "Whisk eggs. Cook chopped veggies in a pan. Add eggs and fold.",
-    "tags": ["breakfast", "fast", "healthy"],
-  },
-  {
-    "name": "Pasta with Tomato Sauce",
-    "ingredients": ["pasta", "tomato", "garlic", "olive oil", "salt", "basil"],
-    "instructions": "Boil pasta. Simmer garlic and tomato sauce. Mix.",
-    "tags": ["lunch", "easy"],
-  },
-  {
-    "name": "Mexican Chicken Tacos",
-    "ingredients": ["chicken", "tortillas", "onion", "cilantro", "lime"],
-    "instructions": "Sauté chicken. Warm tortillas. Add toppings.",
-    "tags": ["latin", "protein"],
-  },
-  {
-    "name": "Lentil Soup",
-    "ingredients": ["lentils", "carrot", "onion", "celery", "garlic", "salt"],
-    "instructions": "Simmer all ingredients for 30 min.",
-    "tags": ["vegan", "cheap", "batch-cooking"],
-  },
-  {
-    "name": "Fried Rice",
-    "ingredients": ["rice", "egg", "carrot", "pea", "soy sauce", "onion"],
-    "instructions": "Stir fry ingredients in wok.",
-    "tags": ["asian", "use-leftovers"],
-  },
-  {
-    "name": "Chicken Rice Bowl",
-    "ingredients": ["rice", "chicken", "soy sauce", "carrot", "onion"],
-    "instructions": "Cook rice. Stir fry chicken and veggies.",
-    "tags": ["balanced"],
-  },
-  {
-    "name": "Guacamole",
-    "ingredients": ["avocado", "onion", "tomato", "lime", "cilantro", "salt"],
-    "instructions": "Mash avocado. Mix chopped ingredients.",
-    "tags": ["dip", "healthy", "snack"],
-  },
-  {
-    "name": "Greek Salad",
-    "ingredients": [
-      "tomato",
-      "cucumber",
-      "olive oil",
-      "onion",
-      "feta",
-      "oregano",
-    ],
-    "instructions": "Chop and mix all ingredients.",
-    "tags": ["veggie", "fresh", "low-cal"],
-  },
-  {
-    "name": "Fruit Yogurt Bowl",
-    "ingredients": ["yogurt", "banana", "berries", "honey", "granola"],
-    "instructions": "Layer yogurt, fruit and granola.",
-    "tags": ["breakfast", "healthy"],
-  },
-  {
-    "name": "Stir-Fry Veggies",
-    "ingredients": ["broccoli", "carrot", "pepper", "soy sauce", "garlic"],
-    "instructions": "Stir fry on high heat.",
-    "tags": ["vegan", "fast"],
-  },
-];
-
-List<Map<String, dynamic>> suggestRecipes(
-  List<String> userIngredients, {
-  int topK = 3,
-}) {
-  final userSet = userIngredients.map((e) => e.trim().toLowerCase()).toSet();
-  final List<Map<String, dynamic>> scored = [];
-  for (final r in recipes) {
-    final rSet = (r['ingredients'] as List)
-        .map((e) => e.toString().toLowerCase())
-        .toSet();
-    final overlap = userSet.intersection(rSet).length;
-    final score = overlap / max(1, rSet.length);
-    scored.add({
-      "name": r['name'],
-      "score": score,
-      "ingredients": r['ingredients'],
-      "instructions": r['instructions'],
-    });
-  }
-  scored.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
-  return scored.take(topK).toList();
-}
-
-/// Fetch recipes from TheMealDB API by searching for each ingredient token,
-/// then fetching full meal details to extract the ingredient list.
-Future<List<Map<String, dynamic>>> fetchRecipesFromApi(
-  List<String> tokens,
-) async {
-  final Set<String> ids = {};
-  for (final token in tokens) {
-    final q = Uri.encodeComponent(token);
-    final url = Uri.parse(
-      'https://www.themealdb.com/api/json/v1/1/filter.php?i=$q',
-    );
-    try {
-      final resp = await http.get(url).timeout(const Duration(seconds: 6));
-      if (resp.statusCode == 200) {
-        final data = json.decode(resp.body);
-        final meals = data['meals'];
-        if (meals != null && meals is List) {
-          for (final m in meals) {
-            final id = m['idMeal']?.toString();
-            if (id != null) ids.add(id);
-          }
-        }
-      }
-    } catch (_) {
-      // ignore per-token failures and continue
-    }
-    // avoid collecting too many candidates
-    if (ids.length > 60) break;
-  }
-
-  final List<Map<String, dynamic>> out = [];
-  for (final id in ids) {
-    final url = Uri.parse(
-      'https://www.themealdb.com/api/json/v1/1/lookup.php?i=$id',
-    );
-    try {
-      final resp = await http.get(url).timeout(const Duration(seconds: 6));
-      if (resp.statusCode == 200) {
-        final data = json.decode(resp.body);
-        final meals = data['meals'];
-        if (meals != null && meals is List && meals.isNotEmpty) {
-          final m = meals.first;
-          final name = m['strMeal'] ?? '';
-          final instructions = m['strInstructions'] ?? '';
-          final List<String> ingredients = [];
-          for (var i = 1; i <= 20; i++) {
-            final key = 'strIngredient$i';
-            final ing = m[key];
-            if (ing != null && ing.toString().trim().isNotEmpty) {
-              ingredients.add(ing.toString().toLowerCase().trim());
-            }
-          }
-          out.add({
-            'id': id,
-            'name': name,
-            'instructions': instructions,
-            'ingredients': ingredients,
-          });
-        }
-      }
-    } catch (_) {
-      // ignore per-id failures
-    }
-    if (out.length > 80) break;
-  }
-
-  return out;
-}
